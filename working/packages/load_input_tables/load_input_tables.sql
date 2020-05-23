@@ -390,7 +390,7 @@ begin
          chng_type, definitiondescription, status, consumer_name, classtype, formula, species, exmpl_answers, survey_quest_text, survey_quest_src, unitsrequired, submitted_units, relatednames2, shortname, 
          order_obs, cdisc_common_tests, hl7_field_subfield_id, external_copyright_notice, example_units, long_common_name, unitsandrange, example_ucum_units, example_si_ucum_units, status_reason, 
          status_text, change_reason_public, common_test_rank, common_order_rank, common_si_test_rank, hl7_attachment_structure, external_copyright_link, paneltype, askatorderentry, associatedobservations, 
-         versionfirstreleased, validhl7attachmentrequest';
+         versionfirstreleased, validhl7attachmentrequest, displayname';
       alter table sources.loinc ADD COLUMN vocabulary_date date;
       alter table sources.loinc ADD COLUMN vocabulary_version VARCHAR (200);
       update sources.loinc set vocabulary_date=COALESCE(pVocabularyDate,current_date), vocabulary_version=COALESCE(pVocabularyVersion,pVocabularyID||' '||current_date);
@@ -426,10 +426,11 @@ begin
         COALESCE(pVocabularyDate,current_date),COALESCE(pVocabularyVersion,pVocabularyID||' '||current_date) 
         from sources.py_xlsparse_hcpcs(pVocabularyPath||'/HCPC_CONTR_ANWEB.xlsx') where add_date ~ '\d{6}';
   when 'SNOMED' then
-      truncate table sources.sct2_concept_full_merged, sources.sct2_desc_full_merged, sources.sct2_rela_full_merged, sources.der2_crefset_assreffull_merged;
+      truncate table sources.sct2_concept_full_merged, sources.sct2_desc_full_merged, sources.sct2_rela_full_merged, sources.der2_crefset_assreffull_merged, sources.der2_crefset_language_merged;
       drop index sources.idx_concept_merged_id;
       drop index sources.idx_desc_merged_id;
       drop index sources.idx_rela_merged_id;
+      drop index sources.idx_lang_merged_refid;
       --loading sct2_concept_full_merged
       execute 'COPY sources.sct2_concept_full_merged (id,effectivetime,active,moduleid,statusid) FROM '''||pVocabularyPath||'sct2_Concept_Full_INT.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
       execute 'COPY sources.sct2_concept_full_merged (id,effectivetime,active,moduleid,statusid) FROM '''||pVocabularyPath||'sct2_Concept_Full-UK.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
@@ -477,7 +478,7 @@ begin
         AND s_int.active = s.active AND s_int.moduleid=s.moduleid
         AND s_int.refsetid=s.refsetid AND s_int.referencedcomponentid=s.referencedcomponentid
         AND s_int.targetcomponent = s.targetcomponent AND s_int.ctid > s.ctid);
-	  CREATE INDEX idx_concept_merged_id ON sources.sct2_concept_full_merged (id);
+      CREATE INDEX idx_concept_merged_id ON sources.sct2_concept_full_merged (id);
       CREATE INDEX idx_desc_merged_id ON sources.sct2_desc_full_merged (conceptid);
       CREATE INDEX idx_rela_merged_id ON sources.sct2_rela_full_merged (id);
       analyze sources.sct2_concept_full_merged;
@@ -493,6 +494,20 @@ begin
       execute 'COPY sources.f_amp2 FROM '''||pVocabularyPath||'f_amp2.xml'' delimiter E''\b''';
       execute 'COPY sources.f_ampp2 FROM '''||pVocabularyPath||'f_ampp2.xml'' delimiter E''\b''';
       execute 'COPY sources.dmdbonus FROM '''||pVocabularyPath||'dmdbonus.xml'' delimiter E''\b''';
+      --loading der2_sRefset_SimpleMapFull_INT
+      truncate table sources.der2_srefset_simplemapfull_int;
+      execute 'COPY sources.der2_srefset_simplemapfull_int FROM '''||pVocabularyPath||'der2_sRefset_SimpleMapFull_INT.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      --loading der2_crefset_language_merged
+      execute 'COPY sources.der2_crefset_language_merged (id,effectivetime,active,moduleid,refsetId,referencedComponentId,acceptabilityId) FROM '''||pVocabularyPath||'der2_sRefset_LanguageFull_INT.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      update sources.der2_crefset_language_merged set source_file_id='INT' where source_file_id is null;
+      execute 'COPY sources.der2_crefset_language_merged (id,effectivetime,active,moduleid,refsetId,referencedComponentId,acceptabilityId) FROM '''||pVocabularyPath||'der2_sRefset_LanguageFull_UK.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      update sources.der2_crefset_language_merged set source_file_id='UK' where source_file_id is null;
+      execute 'COPY sources.der2_crefset_language_merged (id,effectivetime,active,moduleid,refsetId,referencedComponentId,acceptabilityId) FROM '''||pVocabularyPath||'der2_sRefset_LanguageFull_US.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      update sources.der2_crefset_language_merged set source_file_id='US' where source_file_id is null;
+      execute 'COPY sources.der2_crefset_language_merged (id,effectivetime,active,moduleid,refsetId,referencedComponentId,acceptabilityId) FROM '''||pVocabularyPath||'der2_sRefset_LanguageFull_GB_DE.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      update sources.der2_crefset_language_merged set source_file_id='GB_DE' where source_file_id is null;
+      CREATE INDEX idx_lang_merged_refid ON sources.der2_crefset_language_merged (referencedcomponentid);
+      analyze sources.der2_crefset_language_merged;
   when 'ICD10CM' then
       truncate table sources.icd10cm_temp, sources.icd10cm;
       execute 'COPY sources.icd10cm_temp FROM '''||pVocabularyPath||'icd10cm.txt'' delimiter E''\b''';
@@ -695,9 +710,48 @@ begin
       analyze sources.vet_sct2_concept_full;
       analyze sources.vet_sct2_desc_full;
       analyze sources.vet_sct2_rela_full;
+  when 'EDI' then
+      truncate table sources.edi_data;
+      execute 'COPY sources.edi_data (concept_code,concept_name,concept_synonym,domain_id,vocabulary_id,concept_class_id,valid_start_date,valid_end_date,invalid_reason,ancestor_concept_code,previous_concept_code,material,dosage,dosage_unit,sanjung_name) FROM '''||pVocabularyPath||'ediData_UTF8v3.csv'' delimiter '','' csv quote ''"'' HEADER';
+      update sources.edi_data set vocabulary_date=COALESCE(pVocabularyDate,current_date), vocabulary_version=COALESCE(pVocabularyVersion,pVocabularyID||' '||current_date);
+  when 'ICD10CN' then
+      truncate table sources.icd10cn_concept, sources.icd10cn_concept_relationship;
+      execute 'COPY sources.icd10cn_concept (concept_id,concept_name,domain_id,vocabulary_id,concept_class_id,standard_concept,concept_code,valid_start_date,valid_end_date,invalid_reason,english_concept_name,vocabulary_date,vocabulary_version) FROM '''||pVocabularyPath||'icd10cn_concept.tsv'' delimiter E''\t'' csv quote ''"'' HEADER';
+      execute 'COPY sources.icd10cn_concept_relationship FROM '''||pVocabularyPath||'icd10cn_concept_relationship.csv'' delimiter E''\t'' csv quote ''"'' HEADER';
+      update sources.icd10cn_concept set vocabulary_date=COALESCE(pVocabularyDate,current_date), vocabulary_version=COALESCE(pVocabularyVersion,pVocabularyID||' '||current_date);
+      --create 'clear' concept code
+      update sources.icd10cn_concept set concept_code_clean=substring(trim('()' from concept_code),'([^*(]*)');
+  when 'NEBRASKA LEXICON' then
+      truncate table sources.lex_sct2_concept, sources.lex_sct2_desc, sources.lex_sct2_rela, sources.lex_der2_crefset_assref;
+      execute 'COPY sources.lex_sct2_concept (id,effectivetime,active,moduleid,statusid) FROM '''||pVocabularyPath||'sct2_Concept.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      update sources.lex_sct2_concept set vocabulary_date=COALESCE(pVocabularyDate,current_date), vocabulary_version=COALESCE(pVocabularyVersion,pVocabularyID||' '||current_date);
+      execute 'COPY sources.lex_sct2_desc FROM '''||pVocabularyPath||'sct2_Description.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      execute 'COPY sources.lex_sct2_rela FROM '''||pVocabularyPath||'sct2_Relationship.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      execute 'COPY sources.lex_der2_crefset_assref FROM '''||pVocabularyPath||'der2_cRefset_Association.txt'' delimiter E''\t'' csv quote E''\b'' HEADER';
+      analyze sources.lex_sct2_concept;
+      analyze sources.lex_sct2_desc;
+      analyze sources.lex_sct2_rela;
+  when 'ICD9PROCCN' then
+      truncate table sources.icd9proccn_concept, sources.icd9proccn_concept_relationship;
+      execute 'COPY sources.icd9proccn_concept (concept_id,concept_name,domain_id,vocabulary_id,concept_class_id,standard_concept,concept_code,valid_start_date,valid_end_date,invalid_reason,english_concept_name) FROM '''||pVocabularyPath||'icd9proccn_concept.csv'' delimiter E''\t'' csv quote ''"'' HEADER';
+      execute 'COPY sources.icd9proccn_concept_relationship FROM '''||pVocabularyPath||'icd9proccn_concept_relationship.csv'' delimiter E''\t'' csv quote ''"'' HEADER';
+      update sources.icd9proccn_concept set vocabulary_date=COALESCE(pVocabularyDate,current_date), vocabulary_version=COALESCE(pVocabularyVersion,pVocabularyID||' '||current_date);
+  when 'CAP' then
+      truncate table sources.cap_allxmlfilelist, sources.cap_xml_raw;
+      alter table sources.cap_xml_raw alter column xmlfield type text; --first we need TEXT column due to UTF BOM (byte order mark)
+      execute 'COPY sources.cap_allxmlfilelist FROM '''||pVocabularyPath||'cap_allxmlfilelist.dat''';
+      for z in (select * from sources.cap_allxmlfilelist) loop
+        /*Use PROGRAM for running 'cat' with 'tr'. 'tr' for replacing all carriage returns with space. quote E'\f' for prevent 'invalid byte sequence for encoding "UTF8"' errors,
+        because xml files can contain "\..." in strings*/
+        execute 'COPY sources.cap_xml_raw (xmlfield) FROM PROGRAM ''cat "'||pVocabularyPath||z||'"| tr ''''\r\n'''' '''' ''''  '' csv delimiter E''\b'' quote E''\f'' ';
+      end loop;
+      --remove UTF BOM
+      update sources.cap_xml_raw set xmlfield=REPLACE(xmlfield,E'\xEF\xBB\xBF','');
+      alter table sources.cap_xml_raw alter column xmlfield type xml using xmlfield::xml; --return proper TYPE
+      update sources.cap_xml_raw set vocabulary_date=COALESCE(pVocabularyDate,current_date), vocabulary_version=COALESCE(pVocabularyVersion,pVocabularyID||' '||current_date);
   else
       RAISE EXCEPTION 'Vocabulary with id=% not found', pVocabularyID;
-  end case;        
+  end case;
 end;
 $body$
 LANGUAGE 'plpgsql'

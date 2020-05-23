@@ -22,18 +22,18 @@ CREATE TABLE SOURCES.LOINC
 (
   LOINC_NUM                  VARCHAR(10),
   COMPONENT                  VARCHAR(255),
-  PROPERTY                   VARCHAR(30),
-  TIME_ASPCT                 VARCHAR(15),
-  SYSTEM                     VARCHAR(500),
-  SCALE_TYP                  VARCHAR(30),
-  METHOD_TYP                 VARCHAR(100),
-  CLASS                      VARCHAR(50),
-  VERSIONLASTCHANGED         VARCHAR(10),
-  CHNG_TYPE                  VARCHAR(3),
+  PROPERTY                   VARCHAR(255),
+  TIME_ASPCT                 VARCHAR(255),
+  SYSTEM                     VARCHAR(255),
+  SCALE_TYP                  VARCHAR(255),
+  METHOD_TYP                 VARCHAR(255),
+  CLASS                      VARCHAR(255),
+  VERSIONLASTCHANGED         VARCHAR(255),
+  CHNG_TYPE                  VARCHAR(255),
   DEFINITIONDESCRIPTION      TEXT,
-  STATUS                     VARCHAR(11),
+  STATUS                     VARCHAR(255),
   CONSUMER_NAME              VARCHAR(255),
-  CLASSTYPE                  VARCHAR(20),
+  CLASSTYPE                  VARCHAR(255),
   FORMULA                    TEXT,
   SPECIES                    VARCHAR(20),
   EXMPL_ANSWERS              TEXT,
@@ -65,6 +65,7 @@ CREATE TABLE SOURCES.LOINC
   ASSOCIATEDOBSERVATIONS     VARCHAR(255),
   VERSIONFIRSTRELEASED       VARCHAR(255),
   VALIDHL7ATTACHMENTREQUEST  VARCHAR(255),
+  DISPLAYNAME                TEXT,
   VOCABULARY_DATE            DATE,
   VOCABULARY_VERSION         VARCHAR (200)
 );
@@ -110,7 +111,7 @@ CREATE TABLE SOURCES.LOINC_FORMS
     CONDITIONFORINCLUSION         VARCHAR (1000),
     ALLOWABLEALTERNATIVE          VARCHAR (1000),
     OBSERVATIONCATEGORY           VARCHAR (1000),
-    CONTEXT                       VARCHAR (1000),
+    CONTEXT                       TEXT,
     CONSISTENCYCHECKS             VARCHAR (4000),
     RELEVANCEEQUATION             VARCHAR (1000),
     CODINGINSTRUCTIONS            VARCHAR (4000),
@@ -290,3 +291,35 @@ CREATE TABLE SOURCES.LOINC_PART
   PARTDISPLAYNAME       VARCHAR(1000),
   STATUS                VARCHAR(100)
 );
+
+CREATE OR REPLACE FUNCTION vocabulary_pack.GetLoincPrerelease ()
+RETURNS TABLE (
+  created_on date,
+  loinc text,
+  long_common_name text
+) AS
+$body$
+BEGIN
+  set local search_path to devv5;
+  perform http_set_curlopt('CURLOPT_TIMEOUT', '30');
+  set local http.timeout_msec to 30000;
+  return query 
+  select s0.created_on, s0.loinc, s0.long_common_name from (
+    with loinc_table as (
+        select replace(substring(content,'<table id="prereleasetable".*?(<tbody>.*</tbody>)'),'&','&amp;')::xml xmlfield from devv5.http_get('https://loinc.org/prerelease')
+    )
+    select
+      to_date((xpath('./td/text()',sections))[1]::text,'yyyy-mm-dd') as created_on,
+      unnest(xpath('./td/a/text()',sections))::text as loinc,
+      devv5.py_unescape((xpath('./td/text()',sections))[2]::text) as long_common_name,
+      unnest(xpath('./td/i/@title',sections))::text as special_use
+    from loinc_table i,
+    unnest(xpath('/tbody/tr', i.xmlfield)) sections
+  ) as s0 where s0.special_use is not null;
+END;
+$body$
+LANGUAGE 'plpgsql'
+VOLATILE
+CALLED ON NULL INPUT
+SECURITY DEFINER
+COST 100 ROWS 100;

@@ -47,7 +47,7 @@ INSERT INTO concept_stage (
 	valid_end_date,
 	invalid_reason
 	)
-SELECT SUBSTR(long_description, 1, 255) AS concept_name,
+SELECT TRIM(SUBSTR(long_description, 1, 255)) AS concept_name,
 	c.domain_id AS domain_id,
 	v.vocabulary_id,
 	CASE 
@@ -147,6 +147,7 @@ WHERE NOT EXISTS (
 --update from manual if something was changed
 UPDATE concept_stage cs
 SET concept_name = m.concept_name,
+	domain_id = m.domain_id,
 	valid_start_date = m.valid_start_date,
 	valid_end_date = m.valid_end_date,
 	invalid_reason = m.invalid_reason
@@ -155,11 +156,11 @@ WHERE cs.concept_code = m.concept_code
 	AND cs.vocabulary_id = m.vocabulary_id
 	AND (
 		cs.concept_name <> m.concept_name
+		OR COALESCE(cs.domain_id,'X') <> COALESCE(m.domain_id,'X')
 		OR cs.valid_start_date <> m.valid_start_date
 		OR cs.valid_end_date <> m.valid_end_date
 		OR COALESCE(cs.invalid_reason, 'X') <> COALESCE(m.invalid_reason, 'X')
 		);
-
 
 --4 UPDATE domain_id in concept_stage
 --4.1. Part 1. UPDATE domain_id defined by rules
@@ -968,7 +969,7 @@ AS (
 				THEN 'Procedure' -- various screening
 			WHEN l1.str = 'V Codes'
 				THEN 'Device' -- default for Level 1: V0000-V5999 Vision AND hearing services
-			ELSE 'Observation' -- use 'observation' in other cases
+			ELSE COALESCE(hcpc.domain_id,'Observation') -- use 'observation' in other cases
 			END AS domain_id
 	FROM concept_stage hcpc
 	LEFT JOIN (
@@ -1416,7 +1417,12 @@ FROM (
 	SELECT SUBSTR(long_description, 1, 1000) AS synonym_name,
 		HCPC
 	FROM sources.anweb_v2
-	) AS s0;
+	) AS s0
+
+UNION ALL
+
+VALUES ('U0001','COVID-19 testing in CDC laboratory','HCPCS',4180186),
+	('U0002','COVID-19 testing in non-CDC laboratory','HCPCS',4180186);
 
 --6. Run HCPCS/ProcedureDrug.sql. This will create all the input files for MapDrugVocabulary.sql
 DO $_$
